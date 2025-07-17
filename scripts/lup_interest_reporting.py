@@ -1,7 +1,7 @@
-# Filename: ce_overlap.py
+# Filename: lup_interest_reporting.py
 # Author: Graydon Shevchenko
-# Created: April 22, 2025
-# Description: This script is used to report out on cumulative effects values and where they intersect with a defined area of interest
+# Created: July 17, 2025
+# Description: TThis script is designed to report out on overlas of features with a given area of interest to help support landuse planning
 
 import sys
 import os
@@ -34,16 +34,16 @@ def run_app() -> None:
 
     # Gather the input parameters and set up the class oject
     file_num, out_dir, xls, aoi, aoi_fld, leave, python_dir, logger = get_input_parameters()
-    ce_overlaps = CE_Overlaps(file_number=file_num, output_dir=out_dir, xls_schema=xls, aoi=aoi, aoi_field=aoi_fld,
+    lup_overlaps = LUP_Overlaps(file_number=file_num, output_dir=out_dir, xls_schema=xls, aoi=aoi, aoi_field=aoi_fld,
                             leave_areas=leave, python_dir=python_dir, logger=logger)
     
     # Run the class methods needed to perform the overlap assessment
-    ce_overlaps.setup_aoi()
-    ce_overlaps.overlay_values()
-    ce_overlaps.write_excel()
+    lup_overlaps.setup_aoi()
+    lup_overlaps.overlay_values()
+    lup_overlaps.write_excel()
 
     # Delete the class object
-    del ce_overlaps
+    del lup_overlaps
 
 
 def get_input_parameters() -> tuple:
@@ -58,8 +58,8 @@ def get_input_parameters() -> tuple:
 
     try:
         # Set up the input parameters. This matches what is put into the toolbox tool within ArcGIS.  Doing this allows for running the script within command line
-        parser = ArgumentParser(description='This script is used to calculate cumulative effects values based on an '
-                                            'input area of interest. Regional based CE values can be used by inputting a schema using an excel file')
+        parser = ArgumentParser(description='This script is used to calculate land use planning overlap values '
+                                            'based on an input area of interest. Regional based CE values can be used ' 'by inputting a schema using an excel file')
         parser.add_argument('file_num', type=str, help='File Name or number')
         parser.add_argument('out_dir', type=str, help='Output directory')
         parser.add_argument('xls', type=str, help='Input schema Excel file')
@@ -83,7 +83,7 @@ def get_input_parameters() -> tuple:
         logging.exception(f'Unexpected exception, program terminating: {repr(e)}')
 
 
-class CE_Overlaps:
+class LUP_Overlaps:
     """
     CLASS
 
@@ -117,11 +117,11 @@ class CE_Overlaps:
         self.logger = logger
 
         # Set up the ce dictionary for storing the values
-        self.dict_ce_values = defaultdict(lambda: defaultdict(lambda: CE_Value))
+        self.dict_lup_values = defaultdict(lambda: defaultdict(lambda: CE_Value))
 
         # File paths for spatial files, connections and output files
         self.bcgw = os.path.join(self.python_dir, 'util', 'BCGW_Connection.sde')
-        self.out_gdb = os.path.join(self.output_dir, f'ce_data_{self.file_number}.gdb')
+        self.out_gdb = os.path.join(self.output_dir, f'lup_data_{self.file_number}.gdb')
         self.fd_incoming = os.path.join(self.out_gdb, 'incoming')
         self.fd_work = os.path.join(self.out_gdb, 'work')
 
@@ -133,7 +133,7 @@ class CE_Overlaps:
         self.dict_aoi_area = defaultdict(int)
 
         self.xls_output = os.path.join(self.output_dir, 
-                                      f'CE_Overview_{self.file_number}_{datetime.strftime(datetime.today(), "%Y%m%d")}.xlsx')
+                                      f'LUP_Overview_{self.file_number}_{datetime.strftime(datetime.today(), "%Y%m%d")}.xlsx')
 
         # Other variables required for running the script
         self.xl_style = None
@@ -191,21 +191,20 @@ class CE_Overlaps:
         arcpy.env.extent = self.fc_aoi
 
         # Read in the schema values from the input excel file
-        self.logger.info('Reading in ce values from excel schema')
+        self.logger.info('Reading in lup values from excel schema')
         try:
-            ce_df = pandas.read_excel(self.xls_schema, sheet_name='CE Indicators', engine='openpyxl', skiprows=[1], 
+            ce_df = pandas.read_excel(self.xls_schema, sheet_name='LUP Indicators', engine='openpyxl', skiprows=[1], 
                                     na_filter=False)
         except:
-            self.logger.error('Could not read in the excel schema as it does not contain the CE Indicators sheet')
+            self.logger.error('Could not read in the excel schema as it does not contain the LUP Indicators sheet')
             sys.exit()
 
         try:
             # Loop through each row and gather the ce value information
             for row in ce_df.itertuples():
                 # Check if any of the required fields are empty, if so, then skip over it
-                if any([not i for i in [row.CE_VALUE, row.VALUE_TYPE, row.DATASET_NAME, row.ASSESSMENT_YEAR, 
-                            row.PATH]]):
-                    self.logger.warning(f'The value {row.CE_VALUE} is missing one or more of the required fields; skipping this value')
+                if any([not i for i in [row.CATEGORY, row.DATASET_NAME, row.PATH]]):
+                    self.logger.warning(f'The value {row.DATASET_NAME} is missing one or more of the required fields; skipping this value')
                     continue
                 # Check the indicated path object exists, if not it may be a BCGW path
                 if arcpy.Exists(row.PATH):

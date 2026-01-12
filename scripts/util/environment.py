@@ -10,6 +10,7 @@ from xml.etree import ElementTree as eT
 from datetime import datetime as dt
 
 
+
 class ArcPyLogHandler(logging.StreamHandler):
     """
     ------------------------------------------------------------------------------------------------------------
@@ -112,3 +113,77 @@ class Environment:
             logger.addHandler(arc_handler)
 
         return logger
+
+
+    @staticmethod
+    def create_bcgw_connection(location, bcgw_user_name, bcgw_password, db_name='Temp_BCGW.sde', logger=None):
+        """
+            ------------------------------------------------------------------------------------------------------------
+                FUNCTION: Creates a connection object to the bcgw SDE database
+
+                Parameters:
+                    location: path to where the database connection object will be saved
+                    bcgw_user_name: User name for the BCGW
+                    bcgw_password: Password for the BCGW
+                    db_name: database name
+                    logger: logging object for message output
+
+                Return: None
+            ------------------------------------------------------------------------------------------------------------
+        """
+        if logger:
+            logger.info('Connecting to BCGW')
+
+        if not arcpy.Exists(os.path.join(location, db_name)):
+            arcpy.CreateDatabaseConnection_management(out_folder_path=location,
+                                                      out_name=db_name[:-4],
+                                                      database_platform='ORACLE',
+                                                      instance='bcgw.bcgov/idwprod1.bcgov',
+                                                      username=bcgw_user_name,
+                                                      password=bcgw_password,
+                                                      save_user_pass='SAVE_USERNAME')
+        return os.path.join(location, 'Temp_BCGW.sde')
+
+    @staticmethod
+    def delete_bcgw_connection(location, db_name='Temp_BCGW.sde', logger=None):
+        """
+           ------------------------------------------------------------------------------------------------------------
+               FUNCTION: Deletes the bcgw database connection object
+
+               Parameters:
+                   location: path to where the database connection object exists
+                   db_name: database name
+                   logger: logging object for message output
+
+               Return: None
+           ------------------------------------------------------------------------------------------------------------
+        """
+        bcgw_path = os.path.join(location, db_name)
+        if logger:
+            logger.info('Deleting BCGW connection')
+        if location == 'Database Connections':
+            os.remove(Environment.sde_connection(db_name))
+        else:
+            os.remove(bcgw_path)
+
+    @staticmethod
+    def sde_connection(db_name):
+        """
+            ------------------------------------------------------------------------------------------------------------
+                FUNCTION: get the network path of an sde connection if its in Database Connections
+
+                Parameters:
+                    db_name: name of the database to look for
+
+                Return str: path of the sde connection file
+            ------------------------------------------------------------------------------------------------------------
+        """
+        appdata = os.getenv('APPDATA')
+        arcgisVersion = arcpy.GetInstallInfo()['Version'][:-2] \
+            if arcpy.GetInstallInfo()['Version'].count('.') > 1 else arcpy.GetInstallInfo()['Version']
+        arcCatalogPath = os.path.join(appdata, 'ESRI', u'Desktop' + arcgisVersion, 'ArcCatalog')
+
+        for f in os.listdir(arcCatalogPath):
+            fileIsSdeConnection = f.lower().endswith(".sde")
+            if fileIsSdeConnection and f == db_name:
+                return os.path.join(arcCatalogPath, f)

@@ -371,7 +371,7 @@ class LUP_Overlaps:
 
     def __del__(self):
 
-        Environment.delete_bcgw_connection(location=self.output_dir, logger=self.logger)
+        # Environment.delete_bcgw_connection(location=self.output_dir, logger=self.logger)
         self.logger.info('Clearing workspace cache')
         arcpy.management.ClearWorkspaceCache()
 
@@ -872,10 +872,10 @@ class LUP_Overlaps:
                     au_count = 0
                     for au in lup_ds.aoi[aoi].assessment_units:
                         au_count += 1
-                        total_shp += lup_ds.aoi[aoi].assessment_units[au].total_area
+                        total_shp += lup_ds.aoi[self.str_overall].assessment_units[au].total_area
                         aoi_shp += lup_ds.aoi[aoi].assessment_units[au].aoi_area
                     if au_count == 0:
-                        # If there was no overlap with the aoi, then indicate as such in the sheet and mvoe on to the next  dataset
+                        # If there was no overlap with the aoi, then indicate as such in the sheet and move on to the next  dataset
                         ws.cell(row=i_row, column=i_col + i, 
                                 value=f'No overlap with {ds}').style = self.xl_style.regular_na
                         ws.merge_cells(start_row=i_row, start_column=i_col + i, end_row=i_row, 

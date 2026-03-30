@@ -596,8 +596,12 @@ class LUP_Overlaps:
                 union_name = f"union_{str(lup_ds.name).lower().replace(' ', '_')}"
                 union_fc = os.path.join(self.fd_work, union_name)
 
-                
-                fc_lyr = arcpy.management.MakeFeatureLayer(in_features=in_fc, out_layer='fc_lyr', where_clause=sql)
+                try:
+                    fc_lyr = arcpy.management.MakeFeatureLayer(in_features=in_fc, out_layer='fc_lyr', where_clause=sql)
+                except:
+                    self.logger.warnng(f'***Cannot access dataset: {in_fc}')
+                    self.dict_lup_values[ds].fc_status = False
+                    continue
 
                 result = int(arcpy.management.GetCount(fc_lyr).getOutput(0))
                 arcpy.management.SelectLayerByLocation(in_layer=fc_lyr, overlap_type='INTERSECT',select_features=aoi_lyr)
@@ -953,11 +957,11 @@ class LUP_Overlaps:
 
         # Set up the standard styles and add to the workbook
         self.xl_style = ExcelStyles(wb=wb)
-        lst_sheets = [self.str_summary]
+        lst_sheets = [self.str_summary, self.str_overall]
 
         # Add aoi names to the sheet list if there is more than one unique aoi
         if len(self.dict_aoi_area.keys()) > 1:
-            lst_sheets.extend([k for k in self.dict_aoi_area])
+            lst_sheets.extend([k for k in self.dict_aoi_area if k != self.str_overall])
 
         try:
         # Loop through the list of sheets to create
@@ -1160,9 +1164,12 @@ class LUP_Overlaps:
 
                         # If there was no overlap with the aoi, then indicate as such in the sheet and mvoe on to the next  dataset
                         if au_count == 0:
-                            ws.cell(row=i_row, column=i_col, value=f'No overlap with {ds}').style = self.xl_style.regular_na
+                            if ds.fc_status:
+                                ws.cell(row=i_row, column=i_col, value=f'No overlap with {ds}').style = self.xl_style.regular_na
+                            else:
+                                ws.cell(row=i_row, column=i_col, value=f'Error Accessing {ds}').style = self.xl_style.regular_error
                             ws.merge_cells(start_row=i_row, start_column=i_col, end_row=i_row, 
-                                       end_column=i_col + column_length-1)
+                                        end_column=i_col + column_length-1)
                             end_row = i_row
                             i_row += 1
                         
@@ -1263,6 +1270,7 @@ class LU_Value:
         self.join_table_type = join_table_type
         self.buffer = buffer
         self.fc_union = None
+        self.fc_status = True
         self.aoi = defaultdict(AOI) # Dictionary of AOI objects
         self.other_fields_schema = defaultdict(FieldSchema) # Dictionary of FieldSchema objects
 
@@ -1370,6 +1378,8 @@ class ExcelStyles:
         self.regular = self.create_style(wb=self.wb, name='regular', cell_border=True, font_size=8, horiz_align='left')
         self.regular_na = self.create_style(wb=self.wb, name='regular na', cell_border=True, font_size=8, 
                                             horiz_align='left', cell_fill='808080', italic=True)
+        self.regular_error = self.create_style(wb=self.wb, name='regular error', cell_border=True, font_size=8, 
+                                            horiz_align='left', cell_fill='ffc7ce', text_colour='9c0006', italic=True)
         self.regular_right = self.create_style(wb=self.wb, name='regular right', cell_border=True, horiz_align='right', font_size=8)
         self.italics = self.create_style(wb=self.wb, name='italics', font_size=8, italic=True, horiz_align='left', 
                                          cell_border=True)

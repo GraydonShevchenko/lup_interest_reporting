@@ -1164,7 +1164,7 @@ class LUP_Overlaps:
 
                         # If there was no overlap with the aoi, then indicate as such in the sheet and mvoe on to the next  dataset
                         if au_count == 0:
-                            if ds.fc_status:
+                            if lup_ds.fc_status:
                                 ws.cell(row=i_row, column=i_col, value=f'No overlap with {ds}').style = self.xl_style.regular_na
                             else:
                                 ws.cell(row=i_row, column=i_col, value=f'Error Accessing {ds}').style = self.xl_style.regular_error

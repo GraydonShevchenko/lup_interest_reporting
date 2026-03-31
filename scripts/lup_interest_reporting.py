@@ -238,7 +238,9 @@ class LUP_Overlaps:
                     if arcpy.Exists(os.path.join(self.bcgw, row.PATH)):
                         full_path = os.path.join(self.bcgw, row.PATH)
                     else:
-                        self.logger.warning(f'!!! Could not find the path specified in the excel: {row.PATH}. Skipping this     value')
+                        self.logger.warning(f'!!! Could not find the path specified in the excel: {row.PATH}. Skipping this value')
+                        lup_value = LU_Value(name=row.DATASET_NAME, category=row.CATEGORY, status=False)
+                        self.dict_lup_values[row.CATEGORY][row.DATASET_NAME] = lup_value
                         continue
 
                 lst_fields = [f.name for f in arcpy.ListFields(dataset=full_path)]
@@ -270,14 +272,17 @@ class LUP_Overlaps:
                         if arcpy.exists(os.path.join(self.bcgw, row.JOIN_TABLE_PATH)):
                             join_path = os.path.join(self.bcgw, row.JOIN_TABLE_PATH)
                         else:
-                            self.logger.warning(f'!!! Could not find data at the path specified in the excel: {row. JOIN_TABLE_PATH}. Skipping this value')
+                            self.logger.warning(f'!!! Could not find data at the path specified in the excel: {row.JOIN_TABLE_PATH}. Skipping this value')
+                            lup_value = LU_Value(name=row.DATASET_NAME, category=row.CATEGORY, status=False)
+                            self.dict_lup_values[row.CATEGORY][row.DATASET_NAME] = lup_value
                             continue
 
 
                 # Create a CE Value object with the gathered information and add it to the dictionary
                 lup_value = LU_Value(name=row.DATASET_NAME, category=row.CATEGORY, 
-                                    path=full_path, id_fields=id_fields, 
-                                    assess_fields=assess_fields, sql=row.SQL, source_field=row.SOURCE_FIELD, join_table_path=join_path, join_table_type=join_path_type, join_table_field=row.JOIN_TABLE_FIELD, buffer=row.BUFFER)
+                                    path=full_path, id_fields=id_fields, assess_fields=assess_fields, sql=row.SQL, 
+                                    source_field=row.SOURCE_FIELD, join_table_path=join_path, join_table_type=join_path_type, 
+                                    join_table_field=row.JOIN_TABLE_FIELD, buffer=row.BUFFER)
                 self.dict_lup_values[row.CATEGORY][row.DATASET_NAME] = lup_value
         except Exception as e:
             # Exit out of the script if there is an error; most likely caused by an incorrect schema file used
@@ -578,7 +583,8 @@ class LUP_Overlaps:
         for lup in self.dict_lup_values:
             # Loop through the datasets for each lup value
             for ds in self.dict_lup_values[lup]:
-
+                if not self.dict_lup_values[lup][ds].fc_status:
+                    continue
                 self.logger.info(f'Running overlay on {ds}')
                 lup_ds = self.dict_lup_values[lup][ds]
                 in_fc = lup_ds.path
@@ -596,11 +602,13 @@ class LUP_Overlaps:
                 union_name = f"union_{str(lup_ds.name).lower().replace(' ', '_')}"
                 union_fc = os.path.join(self.fd_work, union_name)
 
+                
+
                 try:
                     fc_lyr = arcpy.management.MakeFeatureLayer(in_features=in_fc, out_layer='fc_lyr', where_clause=sql)
                 except:
-                    self.logger.warnng(f'***Cannot access dataset: {in_fc}')
-                    self.dict_lup_values[ds].fc_status = False
+                    self.logger.warning(f'***Cannot access dataset: {in_fc}')
+                    self.dict_lup_values[lup][ds].fc_status = False
                     continue
 
                 result = int(arcpy.management.GetCount(fc_lyr).getOutput(0))
@@ -845,12 +853,28 @@ class LUP_Overlaps:
             header_text = lup
             i_col = 2
             ws.cell(row=i_row, column=i_col, value=header_text).style = self.xl_style.regular
-            row_count = len(self.dict_lup_values[lup]) * len(lst_aois)
+            row_count = (len([f for f in self.dict_lup_values[lup] if self.dict_lup_values[lup][f].fc_status and len(self.dict_lup_values[lup][f].aoi[self.str_overall].assessment_units) > 0]) * len(lst_aois)) + len([f for f in self.dict_lup_values[lup] if not self.dict_lup_values[lup][f].fc_status or len(self.dict_lup_values[lup][f].aoi[self.str_overall].assessment_units) == 0])
             ws.merge_cells(start_row=i_row, start_column=i_col, end_row=i_row + row_count-1, end_column=i_col)
 
             
             for ds in self.dict_lup_values[lup]:
+                i_col = 3
                 lup_ds = self.dict_lup_values[lup][ds]
+                if not lup_ds.fc_status:
+                    ws.cell(row=i_row, column=i_col, value=f'{ds} - {lup_ds.data_type}').style = self.xl_style.regular
+                    ws.cell(row=i_row, column=i_col + 1, 
+                                value=f'Error Accessing {ds}').style = self.xl_style.regular_error
+                    ws.merge_cells(start_row=i_row, start_column=i_col + 1, end_row=i_row, end_column=i_col + 5)
+                    i_row += 1
+                    continue
+                elif len(lup_ds.aoi[self.str_overall].assessment_units) == 0:
+                    ws.cell(row=i_row, column=i_col, value=f'{ds} - {lup_ds.data_type}').style = self.xl_style.regular
+                    ws.cell(row=i_row, column=i_col + 1, 
+                                value=f'No overlap with {ds}').style = self.xl_style.regular_na
+                    ws.merge_cells(start_row=i_row, start_column=i_col + 1, end_row=i_row, end_column=i_col + 5)
+                    i_row += 1
+                    continue
+
                 for aoi in lst_aois:
                     if aoi == self.str_overall:
                         ds_value = f'{ds} - {lup_ds.data_type}'
@@ -1231,7 +1255,7 @@ class LU_Value:
     """
     def __init__(self, name:str, category:str, id_fields: list=[], assess_fields:list=[], 
                  path:str='', sql:str=None, source_field:str=None, join_table_path:str=None, 
-                 join_table_type:str=None, join_table_field:str=None, buffer: float=None) -> None:
+                 join_table_type:str=None, join_table_field:str=None, buffer: float=None, status: bool=True) -> None:
         """
         CLASS METHOD
         
@@ -1248,6 +1272,7 @@ class LU_Value:
             join_table_path (str, optional): Join table path if joining to the dataset. Defaults to None.
             join_table_field (str, optional): Join field within the join table if joining. Defaults to None.
             buffer (float, optional): value to buffer the input dataset by. Defaults to None
+            satus (bool, optional): value indicating if the file was accessible. Defaults to True
         """
         
         self.name = name
@@ -1270,7 +1295,7 @@ class LU_Value:
         self.join_table_type = join_table_type
         self.buffer = buffer
         self.fc_union = None
-        self.fc_status = True
+        self.fc_status = status
         self.aoi = defaultdict(AOI) # Dictionary of AOI objects
         self.other_fields_schema = defaultdict(FieldSchema) # Dictionary of FieldSchema objects
 

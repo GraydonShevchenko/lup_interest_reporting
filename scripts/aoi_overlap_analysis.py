@@ -132,7 +132,7 @@ class LUP_Overlaps:
         #     self.logger.error(f'Connection is not active or database is unreachable: {e}')
         #     sys.exit(1)
         
-        self.out_gdb = os.path.join(self.output_dir, f'lup_data_{self.file_number}.gdb')
+        self.out_gdb = os.path.join(self.output_dir, f'overlap_analysis_{self.file_number}.gdb')
         self.temp_gdb = 'memory'
         self.fd_incoming = os.path.join(self.out_gdb, 'incoming')
         self.fd_work = os.path.join(self.out_gdb, 'work')
@@ -147,7 +147,7 @@ class LUP_Overlaps:
         self.dict_aoi_area = defaultdict(int)
 
         self.xls_output = os.path.join(self.output_dir, 
-                                      f'LUP_Overview_{self.file_number}_{datetime.strftime(datetime.today(), "%Y%m%d")}.xlsx')
+                                      f'Overlap_Analysis_{self.file_number}_{datetime.strftime(datetime.today(), "%Y%m%d")}.xlsx')
 
         # Other variables required for running the script
         self.xl_style = None
@@ -220,8 +220,12 @@ class LUP_Overlaps:
             lup_df = pd.read_excel(self.xls_schema, sheet_name='LUP Indicators', engine='openpyxl', skiprows=[1], 
                                     na_filter=False)
         except:
-            self.logger.error('Could not read in the excel schema as it does not contain the LUP Indicators sheet')
-            sys.exit()
+            try:
+                lup_df = pd.read_excel(self.xls_schema, sheet_name='Datasets', engine='openpyxl', skiprows=[1], 
+                                    na_filter=False)
+            except:
+                self.logger.error('Could not read in the excel schema as it does not contain the LUP Indicators or Datasets sheet')
+                sys.exit()
 
         try:
             # Loop through each row and gather the lup value information
@@ -310,7 +314,8 @@ class LUP_Overlaps:
 
             # Loop through the columns containing the break values and formatting for each lup value
             for i in range(5, len(row)):
-                if not row[i].value:
+                if not row[i].value and row[i].value != 0:
+                    cell_schema = None
                     break
                 # Set up a Value Schema object
                 cell_schema = ValueSchema()
@@ -319,7 +324,7 @@ class LUP_Overlaps:
                 # If the value type specified is a range, then parse the values and place them in the value schema object
                 if fld_schema.value_type == 'Range':
                     # Pull out the numerical values from the string and place them in a list.  This is used to extract ranges that are indicated using the format low value-high value (eg. 0.5-1.2)
-                    lst_range = re.findall(r'-?\d+\.?\d*--?\d+\.?\d*', cell_value.replace(' ',''))
+                    lst_range = re.findall(r'-?\d+\.?\d*--?\d+\.?\d*', cell_value.replace(' ','')) if cell_value != 0 else []
                     range_operator = None
 
                     # If the extracted values are in fact a range, then place them in applicable variables
@@ -330,7 +335,7 @@ class LUP_Overlaps:
                             break
                     # If it is not a standard range, then search for the comparison operators and parse out appropriately
                     else:
-                        range_val = cell_value.replace(' ','')
+                        range_val = str(cell_value).replace(' ','')
                         if '<=' in range_val:
                             low_val = None
                             high_val = range_val.replace('<=','')
@@ -347,6 +352,9 @@ class LUP_Overlaps:
                             low_val = range_val.replace('>','')
                             high_val = None
                             range_operator = '>'
+                        else:
+                            low_val = range_val
+                            high_val = range_val
 
                     # Account for percent values
                     low_val = None if not low_val else float(low_val) if '%' not in low_val else float(low_val.replace('%',''))/100
@@ -366,7 +374,8 @@ class LUP_Overlaps:
 
                 # Add the cell schema object to the field schema object
                 fld_schema.dict_values[cell_value] = cell_schema
-
+            if not fld_schema.dict_values:
+                self.logger.warning(f'There was an issue reading formatting for {ds_name}')
             # Find the appropriate dataset in the lup values dictionary and add in the field schema object
             for lup in self.dict_lup_values:
                 for ds in self.dict_lup_values[lup]:
@@ -599,7 +608,7 @@ class LUP_Overlaps:
                 intersect_fc = os.path.join(self.temp_gdb, 'intersect_fc')
                 buffer_fc = os.path.join(self.temp_gdb, 'buffer_fc')
                 erase_fc = os.path.join(self.temp_gdb, 'erase_fc')
-                union_name = f"union_{str(lup_ds.name).lower().replace(' ', '_')}"
+                union_name = f"union_{str(lup_ds.name).lower().replace(' ', '_').replace('-', '_')}"
                 union_fc = os.path.join(self.fd_work, union_name)
 
                 
@@ -615,7 +624,12 @@ class LUP_Overlaps:
                 arcpy.management.SelectLayerByLocation(in_layer=fc_lyr, overlap_type='INTERSECT',select_features=aoi_lyr)
                 result = int(arcpy.management.GetCount(fc_lyr).getOutput(0))
 
-                arcpy.management.CopyFeatures(in_features=fc_lyr, out_feature_class=temp_fc)
+                desc = arcpy.Describe(value=fc_lyr)
+                if desc.spatialReference.factoryCode != 3005:
+                    self.logger.warning(f'    ** Coordinate system of source is not in NAD83 BC Albers, reprojecting')
+                    arcpy.management.Project(in_dataset=fc_lyr, out_dataset=temp_fc, out_coor_system=arcpy.SpatialReference(3005))
+                else:
+                    arcpy.management.CopyFeatures(in_features=fc_lyr, out_feature_class=temp_fc)
                 arcpy.management.Delete(in_data=fc_lyr)
                 # arcpy.analysis.Select(in_features=in_fc, out_feature_class=temp_fc, where_clause=sql)
                 # arcpy.conversion.ExportFeatures(in_features=in_fc, out_features=temp_fc, field_mapping=field_mappings,
@@ -628,7 +642,7 @@ class LUP_Overlaps:
                     self.logger.warning('***Dataset does not overlap AOI***')
                     continue
 
-                fld_id_lu = f"FID_{str(lup_ds.name).lower().replace(' ', '_')}"
+                fld_id_lu = f"FID_{str(lup_ds.name).lower().replace(' ', '_').replace('-', '_')}"
                 fld_id_lu = fld_id_lu[:60] if len(fld_id_lu) > 60 else fld_id_lu
                 arcpy.management.AddField(in_table=temp_fc, field_name=fld_id_lu, field_type='LONG')
 
@@ -656,8 +670,8 @@ class LUP_Overlaps:
                 arcpy.analysis.PairwiseErase(in_features=temp_fc, erase_features=self.fc_net_aoi,
                                               out_feature_class=erase_fc)
                 self.logger.info('    - combining datasets')
-                arcpy.management.Merge(inputs=[intersect_fc, erase_fc], output=union_fc, 
-                                       field_match_mode='USE_FIRST_SCHEMA')
+                arcpy.management.Merge(inputs=[intersect_fc, erase_fc], output=union_fc,
+                                            field_match_mode='USE_FIRST_SCHEMA')
                 
                 for fc in [temp_fc, intersect_fc, erase_fc]:
                     arcpy.management.Delete(in_data=fc)
@@ -772,13 +786,13 @@ class LUP_Overlaps:
                                 self.dict_lup_values[lup][ds].aoi[self.str_overall].assessment_units[au].aoi_area += shp
                                 # Loop through the additional fields and add the values to the dictionary for overall
                                 for o_fld in lst_additional:
-                                    self.dict_lup_values[lup][ds].aoi[self.str_overall].assessment_units[au].other_fields[o_fld] = row[lst_fields.index(o_fld)] if row[lst_fields.index(o_fld)]else ''
+                                    self.dict_lup_values[lup][ds].aoi[self.str_overall].assessment_units[au].other_fields[o_fld] = row[lst_fields.index(o_fld)] if row[lst_fields.index(o_fld)] is not None else ''
                                 # If an aoi field was selected, increment the aoi area within the assessment unit
                                 if aoi:
                                     self.dict_lup_values[lup][ds].aoi[aoi].assessment_units[au].aoi_area += shp
                                     # Loop through the additional fields and add the values to the dictionary for theaoi
                                     for o_fld in lst_additional:
-                                        self.dict_lup_values[lup][ds].aoi[aoi].assessment_units[au].other_fields[o_fld] = row[lst_fields.index(o_fld)] if row[lst_fields.index(o_fld)] else ''
+                                        self.dict_lup_values[lup][ds].aoi[aoi].assessment_units[au].other_fields[o_fld] = row[lst_fields.index(o_fld)] if row[lst_fields.index(o_fld)] is not None else ''
 
 
                 # If the flag was not lowered, output warning of no overlap                        
@@ -798,7 +812,7 @@ class LUP_Overlaps:
 
         # Write the standardized title information to the top of the sheet
         self.logger.info('Setting up title information')
-        title_text = f'Landuse Plan Analysis - {os.path.basename(self.aoi)}'
+        title_text = f'Overlap Analysis - {os.path.basename(self.aoi)}'
         ws.cell(row=i_row, column=i_col, value=title_text).style = self.xl_style.title
         ws.merge_cells(start_row=i_row, start_column=i_col, end_row=i_row, end_column=i_col + 5)
         i_row +=1
@@ -1128,6 +1142,8 @@ class LUP_Overlaps:
                                 col_index = i_col + lup_headers.index(ce_schema.label)
                                 try:
                                     ce_value = lup_ds.aoi[sheet].assessment_units[au].other_fields[ce_fld]
+                                    if ce_value == '':
+                                        pass
                                 except:
                                     continue
 
@@ -1140,8 +1156,8 @@ class LUP_Overlaps:
                                 ws.cell(row=i_row, column=col_index, value=ce_value)
 
                                 # If there isn't a value, then keep the cell style as regular
-                                if not ce_value:
-                                    ws.cell(row=i_row, column=col_index).style = self.xl_style.regular
+                                if ce_value is None or ce_value == '':
+                                    ws.cell(row=i_row, column=col_index,value='No Value').style = self.xl_style.regular
                                     continue
 
                                 # Gather the other field information and add it within brackets after the main value
@@ -1152,7 +1168,7 @@ class LUP_Overlaps:
 
                                 # Pull the formatting values from the schema object and create the cell style
                                 cell_style = self.xl_style.regular
-                                if ce_schema.value_type:
+                                if ce_schema.value_type and ce_schema.dict_values:
                                     # If the value type is discrete, pull the values as is based on the data
                                     if ce_schema.value_type == 'Discrete':
                                         val_style = ce_schema.dict_values[ce_value]
@@ -1161,21 +1177,20 @@ class LUP_Overlaps:
                                     elif ce_schema.value_type == 'Range':
                                         for val_key in ce_schema.dict_values:
                                             val_schema = ce_schema.dict_values[val_key]
-                                            if val_schema.range_low and val_schema.range_high:
+                                            if val_schema.range_low is not None and val_schema.range_high is not None :
                                                 if val_schema.range_low <= ce_value <= val_schema.range_high:
                                                     break
-                                            elif not val_schema.range_low and val_schema.range_high:
+                                            elif val_schema.range_low is None and val_schema.range_high is not None :
                                                 if val_schema.range_operator == '<=' and ce_value <= val_schema.range_high:
                                                     break
                                                 elif val_schema.range_operator == '<' and ce_value < val_schema.range_high:
                                                     break
-                                            elif val_schema.range_low and not val_schema.range_high:
+                                            elif val_schema.range_low is not None  and val_schema.range_high is None:
                                                 if val_schema.range_operator == '>=' and ce_value >= val_schema.range_low:
                                                     break
                                                 elif val_schema.range_operator == '>' and ce_value > val_schema.range_low:
                                                     break
                                         val_style = val_schema
-
 
                                     # Create a new style object based on the extracted formats, then assign it to the cell
                                     cell_style = self.xl_style.create_style_copy(wb=wb, 

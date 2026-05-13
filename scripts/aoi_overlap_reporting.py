@@ -141,7 +141,8 @@ class LUP_Overlaps:
         self.fc_leave_areas = os.path.join(self.fd_incoming, 'leave_areas')
         self.fc_net_aoi = os.path.join(self.fd_incoming, 'net_aoi')
 
-
+        self.bl_legend = False
+        self.lst_legend = []
 
         self.aoi_total = 0
         self.dict_aoi_area = defaultdict(int)
@@ -153,6 +154,7 @@ class LUP_Overlaps:
         self.xl_style = None
         self.str_summary = 'Summary'
         self.str_overall = 'AOI Overall'
+        self.str_legend = 'Legend'
 
         self.fld_area = 'AreaHA'
 
@@ -223,7 +225,7 @@ class LUP_Overlaps:
             try:
                 lup_df = pd.read_excel(self.xls_schema, sheet_name='Datasets', engine='openpyxl', skiprows=[1], 
                                     na_filter=False)
-            except:
+            except Exception as e:
                 self.logger.error('Could not read in the excel schema as it does not contain the LUP Indicators or Datasets sheet')
                 sys.exit()
 
@@ -790,7 +792,7 @@ class LUP_Overlaps:
                                 # If an aoi field was selected, increment the aoi area within the assessment unit
                                 if aoi:
                                     self.dict_lup_values[lup][ds].aoi[aoi].assessment_units[au].aoi_area += shp
-                                    # Loop through the additional fields and add the values to the dictionary for theaoi
+                                    # Loop through the additional fields and add the values to the dictionary for the aoi
                                     for o_fld in lst_additional:
                                         self.dict_lup_values[lup][ds].aoi[aoi].assessment_units[au].other_fields[o_fld] = row[lst_fields.index(o_fld)] if row[lst_fields.index(o_fld)] is not None else ''
 
@@ -967,6 +969,55 @@ class LUP_Overlaps:
         ws.column_dimensions[get_column_letter(i_col+8)].width = 30
 
 
+
+    def write_legend(self, ws, wb) -> None:
+
+        i_row = 1
+        int_count = 0
+         # Loop through the lup values in the dictionary
+        for lup in self.dict_lup_values:
+            if lup not in self.lst_legend:
+                continue
+            int_val_count = 0
+            i_col = 1
+            lup_row = i_row
+            
+            i_row += 1
+            # Loop through the datasets for the specified lup value
+            for ds in self.dict_lup_values[lup]:
+                # Gather fields, labels and schema for the specific dataset
+                lup_ds = self.dict_lup_values[lup][ds]
+                lup_fields = list(lup_ds.other_fields_schema.keys())
+
+                for ce_fld in lup_fields:
+                    # Pull the values from the schema object
+                    ce_schema = lup_ds.other_fields_schema[ce_fld]
+                    if ce_schema.value_type and ce_schema.dict_values:
+                        i_col = 1
+                        ws.cell(row=i_row, column=i_col, value=ce_schema.label)
+                        i_col += 1
+                        if len(ce_schema.dict_values.keys()) > int_count:
+                            int_count = len(ce_schema.dict_values.keys())
+                        if len(ce_schema.dict_values.keys()) > int_val_count:
+                            int_val_count = len(ce_schema.dict_values.keys())
+                        for val_key in ce_schema.dict_values:
+                            val_schema = ce_schema.dict_values[val_key]
+
+                            cell_style = self.xl_style.create_style_copy(wb=wb, name=f'{lup}-{ds}-legend-{ce_fld}-{val_key}', font=val_schema.style_font, 
+                                                                         align=val_schema.style_align, border=val_schema.style_border, fill=val_schema.style_fill,
+                                                                         num_format=val_schema.style_format)
+
+                            ws.cell(row=i_row, column=i_col, value=val_key).style = cell_style
+                            i_col += 1
+                        i_row += 1
+            ws.cell(row=lup_row, column=1, value=lup).style = self.xl_style.value_header
+            ws.merge_cells(start_row=lup_row, start_column=1, end_row=lup_row, end_column=int_val_count + 1)
+            i_row += 1
+        i_col = 1
+        ws.column_dimensions[get_column_letter(i_col)].width = 50
+        for i in range(1, int_count + 1):
+            ws.column_dimensions[get_column_letter(i_col + i)].width = 20
+
             
 
 
@@ -1012,6 +1063,10 @@ class LUP_Overlaps:
 
                 if sheet == self.str_summary:
                     self.write_summary(ws=ws)
+                    continue
+
+                if sheet == self.str_legend:
+                    self.write_legend(ws=ws, wb=wb)
                     continue
 
                 # Row and column index objects
@@ -1169,6 +1224,9 @@ class LUP_Overlaps:
                                 # Pull the formatting values from the schema object and create the cell style
                                 cell_style = self.xl_style.regular
                                 if ce_schema.value_type and ce_schema.dict_values:
+                                    self.bl_legend = True
+                                    if lup not in self.lst_legend:
+                                        self.lst_legend.append(lup)
                                     # If the value type is discrete, pull the values as is based on the data
                                     if ce_schema.value_type == 'Discrete':
                                         val_style = ce_schema.dict_values[ce_value]
@@ -1194,7 +1252,7 @@ class LUP_Overlaps:
 
                                     # Create a new style object based on the extracted formats, then assign it to the cell
                                     cell_style = self.xl_style.create_style_copy(wb=wb, 
-                                                                                 name=f'{lup}-{ds}-{sheet}-{ce_fld}-    {ce_value}', font=val_style.style_font, 
+                                                                                 name=f'{lup}-{ds}-{sheet}-{ce_fld}-{ce_value}', font=val_style.style_font, 
                                                                                  align=val_style.style_align,   border=val_style.style_border,    fill=val_style.style_fill,     num_format=val_style.style_format)
 
                                 ws.cell(row=i_row, column=col_index).style = cell_style
@@ -1251,6 +1309,13 @@ class LUP_Overlaps:
                 ws.column_dimensions[get_column_letter(i_col+3)].width = 45
                 for i in range(i_col+4, i_col+12):
                     ws.column_dimensions[get_column_letter(i)].width = 25
+            if self.bl_legend:
+                sheet = self.str_legend
+                self.logger.info(f'Writing sheet - {sheet}')
+                wb.create_sheet(title=str(sheet))
+                ws = wb[str(sheet)]
+
+                self.write_legend(ws=ws, wb=wb)
 
         except Exception as e:
             self.logger.error(f'Error creating the excel: {e}')
